@@ -351,8 +351,9 @@ body { font-family: "DM Sans", sans-serif; background: var(--bg); color: var(--t
       <input class="login-input with-prefix" id="lUser" type="text" placeholder="ex: marta" autocomplete="username" autocapitalize="none" spellcheck="false" />
     </div>
     <label class="login-label" for="lPass">Password</label>
-    <div class="login-input-wrap" style="margin-bottom:6px">
-      <input class="login-input" id="lPass" type="password" placeholder="••••••••" autocomplete="current-password" />
+    <div class="login-input-wrap" style="margin-bottom:6px;position:relative">
+      <input class="login-input" id="lPass" type="password" placeholder="••••••••" autocomplete="current-password" style="padding-right:40px" />
+      <span onclick="togglePass('lPass',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;color:var(--text3);user-select:none">👁</span>
     </div>
     <div class="login-remember">
       <input type="checkbox" id="rememberMe" />
@@ -378,6 +379,10 @@ body { font-family: "DM Sans", sans-serif; background: var(--bg); color: var(--t
           <div class="sb-role" id="sbRole">–</div>
         </div>
         <button class="sb-logout" onclick="doLogout()" title="Sair">⏻</button>
+      </div>
+      <div style="margin:0 10px 8px;padding:8px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--r-sm);display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:11px;color:var(--text3)">🔑 Segurança</span>
+        <button onclick="openChangePass()" style="background:none;border:none;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer;font-family:DM Sans,sans-serif">Alterar password</button>
       </div>
       <nav class="nav">
         <div class="nav-section">Principal</div>
@@ -1096,6 +1101,52 @@ document.addEventListener("keydown", e=>{
   if(e.key==="Enter" && $("loginScreen").style.display!=="none") doLogin();
   if(e.key==="Escape") closeModal();
 });
+
+/* ═══ TOGGLE PASSWORD VISIBILITY ═══ */
+function togglePass(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if(input.type === "password") {
+    input.type = "text";
+    btn.textContent = "🙈";
+  } else {
+    input.type = "password";
+    btn.textContent = "👁";
+  }
+}
+
+/* ═══ CHANGE PASSWORD ═══ */
+function openChangePass() {
+  openModal("Alterar password", `
+    <div class="fg">
+      <label>Nova password</label>
+      <div style="position:relative">
+        <input class="login-input" id="newPass1" type="password" placeholder="mínimo 6 caracteres" style="width:100%;padding-right:40px" />
+        <span onclick="togglePass('newPass1',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;color:var(--text3)">👁</span>
+      </div>
+    </div>
+    <div class="fg">
+      <label>Confirmar nova password</label>
+      <div style="position:relative">
+        <input class="login-input" id="newPass2" type="password" placeholder="repete a password" style="width:100%;padding-right:40px" />
+        <span onclick="togglePass('newPass2',this)" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:16px;color:var(--text3)">👁</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveNewPass()">Guardar</button>
+    </div>`);
+}
+
+async function saveNewPass() {
+  const p1 = document.getElementById("newPass1").value;
+  const p2 = document.getElementById("newPass2").value;
+  if(!p1 || p1.length < 6) { toast("⚠️ Password muito curta","Mínimo 6 caracteres","err"); return; }
+  if(p1 !== p2) { toast("⚠️ Passwords não coincidem","","err"); return; }
+  const { error } = await DB.auth.updateUser({ password: p1 });
+  if(error) { toast("❌ Erro",""+error.message,"err"); return; }
+  toast("✅ Password alterada!","Na próxima entrada usa a nova password.","ok");
+  closeModal();
+}
 
 /* ═══ INIT ═══ */
 checkSession();
