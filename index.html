@@ -390,11 +390,13 @@ body { font-family: "DM Sans", sans-serif; background: var(--bg); color: var(--t
         <div class="nav-item" onclick="go('tarefas',this)" id="navTarefas"><span class="nav-icon">✅</span>As minhas tarefas<span class="nb orange" id="nbTarefas">0</span></div>
         <div class="nav-item" onclick="go('ausencias',this)"><span class="nav-icon">🗓️</span>As minhas ausências</div>
         <div class="nav-item" onclick="go('sugestoes',this)"><span class="nav-icon">💡</span>As minhas sugestões</div>
+        <div class="nav-item" onclick="go('atividades',this)"><span class="nav-icon">🔄</span>As minhas atividades</div>
 
         <div class="nav-section admin-el" style="display:none">Administração</div>
         <div class="nav-item admin-el" style="display:none" onclick="go('all-tarefas',this)"><span class="nav-icon">📋</span>Todas as tarefas</div>
         <div class="nav-item admin-el" style="display:none" onclick="go('all-ausencias',this)"><span class="nav-icon">📨</span>Pedidos ausência<span class="nb red" id="nbAus">0</span></div>
         <div class="nav-item admin-el" style="display:none" onclick="go('all-sugestoes',this)"><span class="nav-icon">💡</span>Todas as sugestões</div>
+        <div class="nav-item admin-el" style="display:none" onclick="go('all-atividades',this)"><span class="nav-icon">🔄</span>Todas as atividades</div>
         <div class="nav-item admin-el" style="display:none" onclick="go('utilizadores',this)"><span class="nav-icon">⚙️</span>Utilizadores</div>
         <div class="nav-item admin-el" style="display:none" onclick="go('notificacoes',this)"><span class="nav-icon">🔔</span>Notificações<span class="nb red" id="nbNotif">0</span></div>
       </nav>
@@ -464,6 +466,16 @@ body { font-family: "DM Sans", sans-serif; background: var(--bg); color: var(--t
         <!-- UTILIZADORES -->
         <div id="pg-utilizadores" class="page">
           <div id="usersContent"></div>
+        </div>
+
+        <!-- MINHAS ATIVIDADES -->
+        <div id="pg-atividades" class="page">
+          <div id="myActContent"></div>
+        </div>
+
+        <!-- ADMIN: TODAS ATIVIDADES -->
+        <div id="pg-all-atividades" class="page">
+          <div id="allActContent"></div>
         </div>
 
         <!-- NOTIFICAÇÕES -->
@@ -625,6 +637,8 @@ async function loadPage(p) {
   else if(p==="all-ausencias")   await renderAllAbs();
   else if(p==="all-sugestoes")   await renderAllSug();
   else if(p==="utilizadores")    await renderUsers();
+  else if(p==="atividades")      await renderMyAct();
+  else if(p==="all-atividades")  await renderAllAct();
   else if(p==="notificacoes")    await renderNotifs();
 }
 
@@ -1101,6 +1115,126 @@ document.addEventListener("keydown", e=>{
   if(e.key==="Enter" && $("loginScreen").style.display!=="none") doLogin();
   if(e.key==="Escape") closeModal();
 });
+
+/* ═══ ACTIVITIES ═══ */
+function actBadge(done, recurrence, periodStart) {
+  if(done) return `<span class="chip chip-green">✓ Feito</span>`;
+  return recurrence === 'semanal'
+    ? `<span class="chip chip-blue">🔄 Semanal</span>`
+    : `<span class="chip chip-orange">🔄 Mensal</span>`;
+}
+
+function actHtml(a, showUser=false) {
+  const u = showUser ? userByID(a.assigned_to) : PROFILE;
+  const isAdmin = PROFILE?.is_admin;
+  return `<div class="task-item ${a.done?"feita":""}">
+    <div class="chk ${a.done?"ok":""}" onclick="toggleAct(${a.id},${a.done})">${a.done?"✓":""}</div>
+    <div class="task-info">
+      <div class="task-name ${a.done?"struck":""}">${a.name}</div>
+      <div class="task-sub">
+        ${showUser&&u?`<span>${ava(u.full_name||u.name,u.color,16)} <span style="vertical-align:middle">${u.full_name||u.name}</span></span>`:""}
+        ${a.done&&a.done_at?`<span style="color:var(--green)">✓ ${fmtD(a.done_at)}</span>`:""}
+        ${a.notes?`<span title="${a.notes}">📝</span>`:""}
+      </div>
+    </div>
+    ${actBadge(a.done, a.recurrence, a.period_start)}
+    ${isAdmin?`<button class="btn btn-danger btn-sm" style="margin-left:6px" onclick="deleteAct(${a.id})">🗑️</button>`:""}
+  </div>`;
+}
+
+async function renderMyAct() {
+  const { data } = await DB.from("activities").select("*").eq("assigned_to",ME.id).order("recurrence").order("name");
+  const semanais = (data||[]).filter(a=>a.recurrence==="semanal");
+  const mensais  = (data||[]).filter(a=>a.recurrence==="mensal");
+  $("myActContent").innerHTML=`
+    ${semanais.length>0?`<div class="card" style="margin-bottom:14px">
+      <div class="card-h">🔄 Atividades Semanais</div>
+      <div class="task-list">${semanais.map(a=>actHtml(a)).join("")}</div>
+    </div>`:""}
+    ${mensais.length>0?`<div class="card">
+      <div class="card-h">🔄 Atividades Mensais</div>
+      <div class="task-list">${mensais.map(a=>actHtml(a)).join("")}</div>
+    </div>`:""}
+    ${(!data||data.length===0)?empty("🔄","Sem atividades atribuídas"):""}`;
+}
+
+async function renderAllAct() {
+  const { data } = await DB.from("activities").select("*").order("recurrence").order("name");
+  const semanais = (data||[]).filter(a=>a.recurrence==="semanal");
+  const mensais  = (data||[]).filter(a=>a.recurrence==="mensal");
+  $("allActContent").innerHTML=`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn btn-primary" onclick="openNewAct()">+ Nova atividade</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="resetAllAct('semanal')">🔄 Renovar semanais</button>
+      <button class="btn btn-ghost btn-sm" onclick="resetAllAct('mensal')">🔄 Renovar mensais</button>
+    </div>
+    ${semanais.length>0?`<div class="card" style="margin-bottom:14px">
+      <div class="card-h">🔄 Semanais (${semanais.length})</div>
+      <div class="task-list">${semanais.map(a=>actHtml(a,true)).join("")}</div>
+    </div>`:""}
+    ${mensais.length>0?`<div class="card">
+      <div class="card-h">🔄 Mensais (${mensais.length})</div>
+      <div class="task-list">${mensais.map(a=>actHtml(a,true)).join("")}</div>
+    </div>`:""}
+    ${(!data||data.length===0)?empty("🔄","Sem atividades criadas"):""}`;
+  $("topAction").innerHTML=`<button class="btn btn-primary" onclick="openNewAct()">+ Nova atividade</button>`;
+}
+
+async function toggleAct(id, wasDone) {
+  const done=!wasDone;
+  await DB.from("activities").update({done,done_at:done?new Date().toISOString():null}).eq("id",id);
+  if(done) toast("✅ Atividade concluída!","","ok");
+  await loadPage(CUR_PAGE);
+}
+
+async function deleteAct(id) {
+  if(!confirm("Eliminar esta atividade?")) return;
+  await DB.from("activities").delete().eq("id",id);
+  toast("🗑️ Atividade eliminada","","err");
+  await loadPage(CUR_PAGE);
+}
+
+async function resetAllAct(recurrence) {
+  const label = recurrence==="semanal"?"semanais":"mensais";
+  if(!confirm(`Renovar todas as atividades ${label}? Ficam todas como não concluídas.`)) return;
+  await DB.from("activities").update({done:false,done_at:null,period_start:todayISO()}).eq("recurrence",recurrence);
+  toast(`🔄 Atividades ${label} renovadas!`,"","ok");
+  await loadPage(CUR_PAGE);
+}
+
+function openNewAct() {
+  const opts=USERS.filter(u=>!u.is_admin).map(u=>`<option value="${u.id}">${u.full_name||u.name} (${u.username||"?"})</option>`).join("");
+  openModal("Nova atividade recorrente",`
+    <div class="fg"><label>Descrição</label><input id="aName" placeholder="Ex: Atualizar ficheiros de clientes..." /></div>
+    <div class="fg2">
+      <div class="fg"><label>Atribuir a</label><select id="aUser">${opts}</select></div>
+      <div class="fg"><label>Recorrência</label><select id="aRec"><option value="semanal">🔄 Semanal</option><option value="mensal">🔄 Mensal</option></select></div>
+    </div>
+    <div class="fg"><label>Notas (opcional)</label><textarea id="aNotes2" placeholder="Detalhes..."></textarea></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveAct()">Criar atividade</button>
+    </div>`);
+}
+
+async function saveAct() {
+  const name=$("aName").value.trim();
+  if(!name){toast("⚠️ Escreve a descrição","","err");return;}
+  const {error}=await DB.from("activities").insert({
+    name,
+    assigned_to:$("aUser").value,
+    recurrence:$("aRec").value,
+    notes:$("aNotes2").value,
+    done:false,
+    period_start:todayISO()
+  });
+  if(error){toast("❌ Erro",""+error.message,"err");return;}
+  toast("✅ Atividade criada!","","ok");
+  closeModal();
+  await loadPage(CUR_PAGE);
+}
 
 /* ═══ TOGGLE PASSWORD VISIBILITY ═══ */
 function togglePass(inputId, btn) {
