@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Irmarfer Structures — Equipa</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root {
   --bg:#0d0f14;--surface:#141720;--surface2:#1a1f2e;--surface3:#202636;
@@ -410,8 +409,113 @@ body{font-family:"DM Sans",sans-serif;background:var(--bg);color:var(--text);fon
 const SUPABASE_URL="https://nbxcddqlajhcexxqzocd.supabase.co";
 const SUPABASE_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5ieGNkZHFsYWpoY2V4eHF6b2NkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM4MzI5NTcsImV4cCI6MjA4OTQwODk1N30.LO9Z8puFoYmKafIwdu9o6gBN5UZbo2OjuezJPGGbLfo";
 const DOMAIN_SUFFIX="@irmarfer.pt";
-const {createClient}=supabase;
-const DB=createClient(SUPABASE_URL,SUPABASE_KEY);
+// Supabase REST API direct (no CDN needed)
+const DB = {
+  _headers: {"apikey": SUPABASE_KEY, "Authorization": "Bearer " + SUPABASE_KEY, "Content-Type": "application/json", "Prefer": "return=representation"},
+  _url: SUPABASE_URL,
+  auth: {
+    _token: null, _user: null,
+    async signInWithPassword({email, password}) {
+      try {
+        const r = await fetch(SUPABASE_URL+"/auth/v1/token?grant_type=password", {
+          method:"POST", headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+          body: JSON.stringify({email, password})
+        });
+        const d = await r.json();
+        if(!r.ok) return {data:null, error:{message:d.error_description||d.msg||"Erro"}};
+        DB.auth._token = d.access_token;
+        DB.auth._user = d.user;
+        DB._headers["Authorization"] = "Bearer " + d.access_token;
+        localStorage.setItem("sb_token", d.access_token);
+        localStorage.setItem("sb_user", JSON.stringify(d.user));
+        return {data:{user:d.user}, error:null};
+      } catch(e) { return {data:null, error:{message:"Erro de ligação"}}; }
+    },
+    async getSession() {
+      const t = localStorage.getItem("sb_token");
+      const u = localStorage.getItem("sb_user");
+      if(t && u) {
+        DB.auth._token = t; DB._headers["Authorization"] = "Bearer " + t;
+        return {data:{session:{access_token:t}}, error:null};
+      }
+      return {data:{session:null}, error:null};
+    },
+    async signOut() {
+      localStorage.removeItem("sb_token"); localStorage.removeItem("sb_user");
+      DB.auth._token = null; DB.auth._user = null;
+      DB._headers["Authorization"] = "Bearer " + SUPABASE_KEY;
+    },
+    async signUp({email, password, options}) {
+      try {
+        const r = await fetch(SUPABASE_URL+"/auth/v1/signup", {
+          method:"POST", headers:{"apikey":SUPABASE_KEY,"Content-Type":"application/json"},
+          body: JSON.stringify({email, password, data: options?.data||{}})
+        });
+        const d = await r.json();
+        if(!r.ok) return {data:{user:null}, error:{message:d.msg||"Erro ao criar"}};
+        return {data:{user:d.user||d}, error:null};
+      } catch(e) { return {data:{user:null}, error:{message:"Erro de ligação"}}; }
+    },
+    async updateUser({password}) {
+      const r = await fetch(SUPABASE_URL+"/auth/v1/user", {method:"PUT", headers:DB._headers, body:JSON.stringify({password})});
+      const d = await r.json(); return r.ok ? {data:d,error:null} : {data:null,error:d};
+    },
+    get currentUser() { try { return JSON.parse(localStorage.getItem("sb_user")); } catch { return null; } }
+  },
+  from(table) {
+    let _url = SUPABASE_URL+"/rest/v1/"+table;
+    let _filters = [], _select = "*", _order = null, _limit = null, _single = false, _count = null, _head = false, _upsert = false;
+    const q = {
+      select(s, opts={}) { _select=s; if(opts.count) _count=opts.count; if(opts.head) _head=true; return q; },
+      eq(col,val) { _filters.push(col+"=eq."+encodeURIComponent(val)); return q; },
+      neq(col,val) { _filters.push(col+"=neq."+encodeURIComponent(val)); return q; },
+      lt(col,val) { _filters.push(col+"=lt."+encodeURIComponent(val)); return q; },
+      lte(col,val) { _filters.push(col+"=lte."+encodeURIComponent(val)); return q; },
+      gte(col,val) { _filters.push(col+"=gte."+encodeURIComponent(val)); return q; },
+      in(col,vals) { _filters.push(col+"=in.("+vals.map(v=>encodeURIComponent(v)).join(",")+")"); return q; },
+      order(col,opts={}) { _order=col+"."+(opts.ascending===false?"desc":"asc"); return q; },
+      limit(n) { _limit=n; return q; },
+      single() { _single=true; return q; },
+      async then(resolve) {
+        let url = _url+"?select="+_select;
+        _filters.forEach(f => url += "&"+f);
+        if(_order) url += "&order="+_order;
+        if(_limit) url += "&limit="+_limit;
+        const h = {...DB._headers};
+        if(_count) { h["Prefer"] = "count="+_count; }
+        if(_head) {
+          const r = await fetch(url, {method:"HEAD", headers:h});
+          const count = parseInt(r.headers.get("content-range")?.split("/")[1]||"0");
+          resolve({count, data:null, error:null}); return;
+        }
+        if(_single) h["Accept"] = "application/vnd.pgrst.object+json";
+        const r = await fetch(url, {headers:h});
+        const d = await r.json();
+        if(!r.ok) { resolve({data:null, error:d}); return; }
+        resolve({data:d, error:null, count:null});
+      },
+      async insert(body) {
+        const r = await fetch(_url, {method:"POST", headers:{...DB._headers,"Prefer":"return=representation"}, body:JSON.stringify(body)});
+        const d = await r.json(); return r.ok ? {data:Array.isArray(d)?d[0]:d, error:null} : {data:null,error:d};
+      },
+      async upsert(body) {
+        const r = await fetch(_url, {method:"POST", headers:{...DB._headers,"Prefer":"resolution=merge-duplicates,return=representation"}, body:JSON.stringify(body)});
+        const d = await r.json(); return r.ok ? {data:d, error:null} : {data:null,error:d};
+      },
+      async update(body) {
+        let url = _url+"?"; _filters.forEach(f => url += f+"&");
+        const r = await fetch(url, {method:"PATCH", headers:{...DB._headers,"Prefer":"return=representation"}, body:JSON.stringify(body)});
+        const d = await r.json(); return r.ok ? {data:d, error:null} : {data:null,error:d};
+      },
+      async delete() {
+        let url = _url+"?"; _filters.forEach(f => url += f+"&");
+        const r = await fetch(url, {method:"DELETE", headers:DB._headers});
+        return r.ok ? {data:null, error:null} : {data:null, error:{message:"Erro ao eliminar"}};
+      }
+    };
+    return q;
+  }
+};
 
 let ME=null,PROFILE=null,USERS=[],CUR_PAGE="dashboard";
 // Calendar state
@@ -450,11 +554,19 @@ async function doLogin(){
   try{
     const{data,error}=await DB.auth.signInWithPassword({email:user+DOMAIN_SUFFIX,password:pass});
     if(error){btn.disabled=false;btn.innerHTML="Entrar";showErr("Nome ou password incorretos.");return}
-    ME=data.user;await bootApp();
+    ME=data.user; localStorage.setItem('sb_user', JSON.stringify(data.user)); await bootApp();
   }catch(e){btn.disabled=false;btn.innerHTML="Entrar";showErr("Erro de ligação. Verifica a tua internet.")}
 }
 function showErr(m){const e=$("loginErr");e.textContent=m;e.style.display="block"}
-async function checkSession(){try{const{data:{session}}=await DB.auth.getSession();if(session){ME=session.user;await bootApp()}}catch(e){console.warn("Session check failed",e)}}
+async function checkSession(){
+  try {
+    const {data:{session}} = await DB.auth.getSession();
+    if(session) {
+      const stored = localStorage.getItem("sb_user");
+      if(stored) { ME = JSON.parse(stored); await bootApp(); }
+    }
+  } catch(e) { console.warn("Session check failed", e); }
+}
 async function doLogout(){await DB.auth.signOut();ME=null;PROFILE=null;USERS=[];$("app").style.display="none";$("loginScreen").style.display="flex";$("lUser").value="";$("lPass").value="";$("loginErr").style.display="none";$("btnLogin").disabled=false;$("btnLogin").innerHTML="Entrar"}
 
 async function bootApp(){
@@ -499,10 +611,13 @@ async function loadPage(p){
 }
 
 async function refreshBadges(){
-  const{count:myP}=await DB.from("tasks").select("id",{count:"exact",head:true}).eq("assigned_to",ME.id).eq("done",false);setBadge("nbTarefas",myP||0);
+  const _tasksRes = await DB.from("tasks").select("id").eq("assigned_to",ME.id).eq("done",false);
+  setBadge("nbTarefas", (_tasksRes.data||[]).length);
   if(!PROFILE?.is_admin)return;
-  const{count:pendAbs}=await DB.from("absences").select("id",{count:"exact",head:true}).eq("status","pending");setBadge("nbAus",pendAbs||0);
-  const{count:unread}=await DB.from("notifications").select("id",{count:"exact",head:true}).eq("read",false);setBadge("nbNotif",unread||0);
+  const _absRes = await DB.from("absences").select("id").eq("status","pending");
+  setBadge("nbAus", (_absRes.data||[]).length);
+  const _notifRes = await DB.from("notifications").select("id").eq("read",false);
+  setBadge("nbNotif", (_notifRes.data||[]).length);
 }
 
 function taskHtml(t,showUser=false){
@@ -529,10 +644,10 @@ function taskHtml(t,showUser=false){
 
 async function renderDash(){if(PROFILE?.is_admin)await renderAdminDash();else await renderUserDash()}
 async function renderUserDash(){
-  const{count:pend}=await DB.from("tasks").select("id",{count:"exact",head:true}).eq("assigned_to",ME.id).eq("done",false);
-  const{count:done}=await DB.from("tasks").select("id",{count:"exact",head:true}).eq("assigned_to",ME.id).eq("done",true);
-  const{count:abs}=await DB.from("absences").select("id",{count:"exact",head:true}).eq("user_id",ME.id);
-  const{count:sug}=await DB.from("suggestions").select("id",{count:"exact",head:true}).eq("user_id",ME.id);
+  const{data:_pd}=await DB.from("tasks").select("id").eq("assigned_to",ME.id).eq("done",false); const pend=(_pd||[]).length;
+  const{data:_dd}=await DB.from("tasks").select("id").eq("assigned_to",ME.id).eq("done",true); const done=(_dd||[]).length;
+  const{data:_ad}=await DB.from("absences").select("id").eq("user_id",ME.id); const abs=(_ad||[]).length;
+  const{data:_sd}=await DB.from("suggestions").select("id").eq("user_id",ME.id); const sug=(_sd||[]).length;
   $("dOverdue").innerHTML="";
   $("dStats").innerHTML=`<div class="stat-card"><div class="stat-lbl">Tarefas pendentes</div><div class="stat-val" style="color:var(--accent)">${pend||0}</div></div><div class="stat-card"><div class="stat-lbl">Concluídas</div><div class="stat-val" style="color:var(--green)">${done||0}</div></div><div class="stat-card"><div class="stat-lbl">Ausências</div><div class="stat-val" style="color:var(--blue)">${abs||0}</div></div><div class="stat-card"><div class="stat-lbl">Sugestões</div><div class="stat-val" style="color:var(--yellow)">${sug||0}</div></div>`;
   const{data:tasks}=await DB.from("tasks").select("*").eq("assigned_to",ME.id).eq("done",false).order("due_date").limit(6);
@@ -540,10 +655,10 @@ async function renderUserDash(){
 }
 async function renderAdminDash(){
   const today=todayISO();
-  const{count:tOpen}=await DB.from("tasks").select("id",{count:"exact",head:true}).eq("done",false);
-  const{count:tDone}=await DB.from("tasks").select("id",{count:"exact",head:true}).eq("done",true);
-  const{count:absP}=await DB.from("absences").select("id",{count:"exact",head:true}).eq("status","pending");
-  const{count:sugTot}=await DB.from("suggestions").select("id",{count:"exact",head:true});
+  const{data:_to}=await DB.from("tasks").select("id").eq("done",false); const tOpen=(_to||[]).length;
+  const{data:_td2}=await DB.from("tasks").select("id").eq("done",true); const tDone=(_td2||[]).length;
+  const{data:_ap}=await DB.from("absences").select("id").eq("status","pending"); const absP=(_ap||[]).length;
+  const{data:_st}=await DB.from("suggestions").select("id"); const sugTot=(_st||[]).length;
   $("dStats").innerHTML=`<div class="stat-card"><div class="stat-lbl">Tarefas abertas</div><div class="stat-val" style="color:var(--accent)">${tOpen||0}</div></div><div class="stat-card"><div class="stat-lbl">Concluídas</div><div class="stat-val" style="color:var(--green)">${tDone||0}</div></div><div class="stat-card"><div class="stat-lbl">Ausências pendentes</div><div class="stat-val" style="color:var(--yellow)">${absP||0}</div></div><div class="stat-card"><div class="stat-lbl">Sugestões</div><div class="stat-val" style="color:var(--blue)">${sugTot||0}</div></div>`;
   const{data:ov}=await DB.from("tasks").select("id,name,assigned_to,due_date").eq("done",false).lt("due_date",today).order("due_date");
   const od=$("dOverdue");
@@ -578,7 +693,7 @@ async function renovarMensais(){
   toast("📅 Mês renovado!","","ok");await loadPage(CUR_PAGE);
 }
 async function toggleTask(id,wasDone){
-  const done=!wasDone;const{data:t}=await DB.from("tasks").update({done,done_at:done?new Date().toISOString():null}).eq("id",id).select().single();
+  const done=!wasDone;const _tr=await DB.from("tasks").update({done,done_at:done?new Date().toISOString():null}).eq("id",id); const t=(_tr.data&&_tr.data[0])||{name:"tarefa"};
   if(done){await DB.from("notifications").insert({message:`${PROFILE.full_name} concluiu "${t.name}"`,type:"task_done",related_id:id});toast("✅ Tarefa concluída!",t.name,"ok")}
   await refreshBadges();await loadPage(CUR_PAGE);
 }
