@@ -822,8 +822,11 @@ function buildCalYear(){
     const firstDay=new Date(CAL_YEAR,m,1).getDay();
     // Count absences in this month for badge
     let absDays=0;for(let d=1;d<=daysInMonth;d++){const iso=`${CAL_YEAR}-${String(m+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;if(map[iso])absDays++;}
-    html+=`<div class="cal-month-card${isCurrent?" active-month":""}" onclick="calGoMonth(${m})">
-      <div class="cal-mc-title${isCurrent?" is-now"}">${MONTHS[m]}${absDays>0?`<span style="font-size:9px;background:var(--accent-dim);color:var(--accent);padding:1px 6px;border-radius:10px">${absDays} dias</span>`:""}</div>
+    const cardClass=isCurrent?"cal-month-card active-month":"cal-month-card";
+    const titleClass=isCurrent?"cal-mc-title is-now":"cal-mc-title";
+    const badge=absDays>0?`<span style="font-size:9px;background:var(--accent-dim);color:var(--accent);padding:1px 6px;border-radius:10px">${absDays} dias</span>`:"";
+    html+=`<div class="${cardClass}" onclick="calGoMonth(${m})">
+      <div class="${titleClass}">${MONTHS[m]}${badge}</div>
       <div class="cal-mini-grid">`;
     DOWS.forEach(d=>{html+=`<div class="cal-mini-dow">${d[0]}</div>`;});
     for(let p=0;p<firstDay;p++)html+=`<div class="cal-mini-day other-m"></div>`;
