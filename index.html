@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Irmarfer Structures — Equipa</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
 :root {
   --bg:#0d0f14;--surface:#141720;--surface2:#1a1f2e;--surface3:#202636;
@@ -447,17 +447,29 @@ async function doLogin(){
   const btn=$("btnLogin"),err=$("loginErr");err.style.display="none";
   if(!user||!pass){showErr("Preenche o nome e a password.");return}
   btn.disabled=true;btn.innerHTML=`<span class="spin"></span>A entrar...`;
-  const{data,error}=await DB.auth.signInWithPassword({email:user+DOMAIN_SUFFIX,password:pass});
-  if(error){btn.disabled=false;btn.innerHTML="Entrar";showErr("Nome ou password incorretos.");return}
-  ME=data.user;await bootApp();
+  try{
+    const{data,error}=await DB.auth.signInWithPassword({email:user+DOMAIN_SUFFIX,password:pass});
+    if(error){btn.disabled=false;btn.innerHTML="Entrar";showErr("Nome ou password incorretos.");return}
+    ME=data.user;await bootApp();
+  }catch(e){btn.disabled=false;btn.innerHTML="Entrar";showErr("Erro de ligação. Verifica a tua internet.")}
 }
 function showErr(m){const e=$("loginErr");e.textContent=m;e.style.display="block"}
-async function checkSession(){const{data:{session}}=await DB.auth.getSession();if(session){ME=session.user;await bootApp()}}
+async function checkSession(){try{const{data:{session}}=await DB.auth.getSession();if(session){ME=session.user;await bootApp()}}catch(e){console.warn("Session check failed",e)}}
 async function doLogout(){await DB.auth.signOut();ME=null;PROFILE=null;USERS=[];$("app").style.display="none";$("loginScreen").style.display="flex";$("lUser").value="";$("lPass").value="";$("loginErr").style.display="none";$("btnLogin").disabled=false;$("btnLogin").innerHTML="Entrar"}
 
 async function bootApp(){
   $("loginScreen").style.display="none";$("app").style.display="block";
-  const{data:prof}=await DB.from("profiles").select("*").eq("id",ME.id).single();PROFILE=prof;
+  // Try to get profile — if it doesn't exist yet, create a basic one
+  let{data:prof,error:profErr}=await DB.from("profiles").select("*").eq("id",ME.id).single();
+  if(profErr||!prof){
+    // Profile may not exist yet — create minimal one from auth metadata
+    const meta=ME.user_metadata||{};
+    const uname=(ME.email||"").replace(DOMAIN_SUFFIX,"");
+    const newProf={id:ME.id,name:meta.full_name||uname,full_name:meta.full_name||uname,email:ME.email,username:uname,color:meta.color||"#f97316",is_admin:false,is_active:true,pending:false};
+    await DB.from("profiles").upsert(newProf);
+    prof=newProf;
+  }
+  PROFILE=prof;
   const{data:all}=await DB.from("profiles").select("*").order("full_name");USERS=all||[];
   const sbAv=$("sbAvatar");sbAv.textContent=ini(PROFILE.full_name);sbAv.style.background=(PROFILE.color||"#f97316")+"22";sbAv.style.color=PROFILE.color||"#f97316";
   $("sbName").textContent=PROFILE.full_name;$("sbRole").textContent=PROFILE.is_admin?"Administradora":"Colaborador";
